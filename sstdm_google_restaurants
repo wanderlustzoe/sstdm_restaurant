@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+		<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?libraries=places&sensor=false"></script>
+		<link href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css" rel="stylesheet">
+		<script src="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/js/bootstrap.min.js"></script>
+
+		<style>
+			.place{
+				cursor: pointer;
+			}
+		</style>
+		<script>
+			$(function() {
+
+				/* initialize google map and places service */
+				var map = new google.maps.Map(document.getElementById('map-canvas'), {
+					mapTypeId: google.maps.MapTypeId.ROADMAP,
+					center: new google.maps.LatLng(40.6700, -73.9400),
+					zoom: 10
+				});
+				var service = new google.maps.places.PlacesService(map);
+
+				/* misc params */
+				var place_types = ['restaurant'];
+
+				var relevance_distance  = 500; /* meters */
+
+
+				/* data mining storage */
+				var my_place = null;
+				var my_place_ranks = [];
+				var neighbor_places = [];
+				var neighbors_inner = [];
+				var total_neighbors = 0;
+
+				/* place search */
+				$( "#search-places").click(function() {
+
+					/* search for term within 30km of NYC */
+					var request = {
+						query: $('#search-term').val(),
+						radius: 30000,
+						location: new google.maps.LatLng(40.6700, -73.9400),
+					};
+				
+					service.textSearch(request, function(results,status){
+						if(status == 'OK'){
+							/* clear list */
+							$("#results").html("");
+							console.log(results);
+							/* draw results in list */
+							for(var i in results){
+
+							/* check if the result fits one of the chosen types. */	
+							for(var j in results[i].types){
+								for(var h in place_types){
+									if(results[i].types[j] == place_types[h]){
+										$('#results').append('<tr><td class="place" data-lat="'+results[i].geometry.location.mb+'" data-lng="'+results[i].geometry.location.nb+'" data-id="'+results[i].id+'">'+results[i].name+" - "+results[i].formatted_address+"</td></tr>");
+
+										/* place marker on map with name */
+										var marker = new google.maps.Marker({
+											position: results[i].geometry.location,
+											map: map,
+											title:results[i].name,
+										});
+									}
+								}
+							}
+
+
+
+							}
+
+							/* upon result click */
+							$( ".place" ).bind( "click", function() {
+								/* reset data */
+								neighbor_places = [];
+								neighbors_inner = [];
+								my_place_ranks = [];
+								my_place = null;
+								$('#analysis').html("");
+
+								/* show selection */
+								$(".place").css('color','black');
+								$(this).css('color','red');
+								my_place = $(this).data('id');
+
+								/* request nearby data around coordinate */
+								var request = {
+									location: new google.maps.LatLng($(this).data('lat'), $(this).data('lng')),
+									radius: relevance_distance,
+									types: place_types,
+									rankBy: google.maps.places.RankBy.PROMINENCE,
+								};
+
+								/* run analysis of similar places */
+								service.nearbySearch(request, function(results, status){
+									if(status == 'OK'){
+										neighbor_places = results;
+
+										for(var i in neighbor_places){
+											var request = {
+												location: new google.maps.LatLng(neighbor_places[i].geometry.location.mb, neighbor_places[i].geometry.location.nb),
+												radius: relevance_distance,
+												types: place_types,
+												rankBy: google.maps.places.RankBy.PROMINENCE,
+											};
+
+											/* search for nearby for result */
+											service.nearbySearch(request, function(results_inner, status){
+												if(status == 'OK'){
+													neighbors_inner.push(results_inner);
+												}
+
+											});
+										}
+									}
+								});
+
+								$('#analysis').html('<strong>...LOADING, PLEASE WAIT...</strong>');
+
+								setTimeout(function(){
+									$('#analysis').html('');
+									/* calculate rank */
+									for(var i in neighbors_inner){
+										for(var j in neighbors_inner[i]){
+											var cur_place = neighbors_inner[i][j];
+											var cur_rank = parseInt(j)+parseInt(1);
+											var place_rank = 100 - ((parseFloat(cur_rank) / parseFloat(neighbors_inner[i].length))*100);
+
+											if(cur_place.id == my_place){
+												$('#analysis').append("<div>"+cur_place.name+" appeared in results at rank: "+cur_rank+" out of "+neighbors_inner[i].length+" - "+place_rank+"%</div>");
+												my_place_ranks.push(place_rank);
+											}
+										}
+									}
+
+									/* calculate average rank */
+									var average_rank = 0;
+									for (var i = my_place_ranks.length - 1; i >= 0; i--) {
+										average_rank += parseFloat(my_place_ranks[i]);
+									}
+									average_rank = (average_rank / parseFloat(neighbors_inner.length));
+
+									/* print resultant score */
+									if(!isNaN(average_rank)){
+										$('#analysis').append('<div><strong>The Average Imporance rating of the place is: '+average_rank.toFixed(2)+'%</strong></div>');
+										$('#analysis').append('<div>(Gathered from '+neighbors_inner.length+' neighbors)</div>');
+									}else{
+										$('#analysis').append('<div>Could not calculate ranking given our formula, due to place not showing in its neighbors results.</div>');
+									}
+									
+								},3000);
+							});
+						}else{
+							/* no results found */
+							$("#results").html("No locations with this name.");
+						}
+					});
+
+					return false;
+				});
+			});
+
+		</script>
+	</head>
+	<body>
+		<div class="container">
+			<div class="row" style="margin-top:10px;text-align:center;">
+				<div class="col-md-12">
+					<form class="form-inline" role="form">
+						<div class="form-group">
+							<input id="search-term" class="form-control" type="text" value="Lombardi's" />
+						</div>
+						
+						<button id="search-places" class="btn btn-default" type="submit" >Search Places</button>	
+					</form>
+				</div>
+			</div>
+		</div>
+
+		<div id="map-canvas" style="width:100%;height:300px;margin-top:10px;margin-bottom:10px;"></div>
+
+		<div class="container">
+			<div class="row">
+				<div class="col-md-6">
+					<table class="table table-striped">
+						<thead>
+							<tr><td><strong>Select Place:</strong></td></tr>
+						</thead>
+						<tbody id="results">
+
+						</tbody>
+					</table>
+				</div>
+
+				<div class="col-md-6 well" id="analysis">
+					<p style="font-size:18px;">...Results will appear here...</p>
+					
+				</div>
+			</div>
+
+
+		</div>
+	</body>
+
+
+</html>
